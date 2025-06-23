@@ -1,5 +1,9 @@
 package com.example.overflo
 
+import android.view.LayoutInflater
+
+import android.os.StatFs
+
 import android.Manifest
 import android.app.Activity
 import android.app.ProgressDialog
@@ -24,6 +28,7 @@ import androidx.documentfile.provider.DocumentFile
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.*
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,6 +36,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "Overflo"
         private const val DEFAULT_DAYS_THRESHOLD = 7
     }
+
 
     private lateinit var deviceListLayout: LinearLayout
     private var fromPath: String = ""
@@ -83,6 +89,8 @@ class MainActivity : AppCompatActivity() {
         checkPermissions()
     }
 
+
+
     private fun checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -105,35 +113,48 @@ class MainActivity : AppCompatActivity() {
     private fun listStorageDevices() {
         deviceListLayout.removeAllViews()
 
-        val dirs = listOf(
-            Environment.getExternalStorageDirectory(),
-            getExternalFilesDirs(null).getOrNull(1)
-        )
-
-        for (dir in dirs) {
-            if (dir != null && dir.exists()) {
-                val stat = android.os.StatFs(dir.path)
-                val total = stat.totalBytes
-                val free = stat.availableBytes
-
-                val card = TextView(this)
-                card.text = """
-                    Path: ${dir.path}
-                    Total: ${total / (1024 * 1024)} MB
-                    Free: ${free / (1024 * 1024)} MB
-                """.trimIndent()
-                card.setPadding(20, 20, 20, 20)
-                card.setBackgroundColor(0xFFE0E0E0.toInt())
-                card.setTextColor(0xFF000000.toInt())
-                val params = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                params.setMargins(0, 0, 0, 30)
-                card.layoutParams = params
-
-                deviceListLayout.addView(card)
+        val storageLocations = mutableListOf<Pair<File, String>>().apply {
+            add(Environment.getExternalStorageDirectory() to "Internal Storage")
+            getExternalFilesDirs(null).getOrNull(1)?.let { externalDir ->
+                add(externalDir to getExternalStorageType(externalDir))
             }
+        }
+
+        for ((dir, storageType) in storageLocations) {
+            val stat = StatFs(dir.path)
+            val totalBytes = stat.blockSizeLong * stat.blockCountLong
+            val freeBytes = stat.blockSizeLong * stat.availableBlocksLong
+            val usedBytes = totalBytes - freeBytes
+
+            // Format sizes with appropriate units
+            fun formatSize(bytes: Long): String {
+                return when {
+                    bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes.toDouble() / (1024 * 1024 * 1024))
+                    bytes >= 1024 * 1024 -> "%.2f MB".format(bytes.toDouble() / (1024 * 1024))
+                    else -> "%.2f KB".format(bytes.toDouble() / 1024)
+                }
+            }
+
+            // Create storage card
+            val card = LayoutInflater.from(this).inflate(R.layout.storage_card, deviceListLayout, false)
+            card.findViewById<TextView>(R.id.storagePath).text = "Type: $storageType"
+            card.findViewById<TextView>(R.id.storageSize).text = "Total: ${formatSize(totalBytes)}"
+            card.findViewById<ProgressBar>(R.id.storageProgress).max = 100
+            card.findViewById<ProgressBar>(R.id.storageProgress).progress =
+                ((usedBytes.toDouble() / totalBytes.toDouble()) * 100).toInt()
+            card.findViewById<TextView>(R.id.storageUsage).text =
+                "${formatSize(usedBytes)} used (${formatSize(freeBytes)} free)"
+
+            deviceListLayout.addView(card)
+        }
+    }
+
+    private fun getExternalStorageType(file: File): String {
+        return when {
+            file.path.contains("usb", ignoreCase = true) -> "USB Drive"
+            file.path.contains("sd", ignoreCase = true) -> "SD Card"
+            file.path.contains("ext", ignoreCase = true) -> "External Storage"
+            else -> "External Storage"
         }
     }
 
